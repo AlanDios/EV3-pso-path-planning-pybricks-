@@ -22,12 +22,15 @@ graph LR
     A[EV3 Brick] --> B[Ultrasonic Sensor]
     A --> C[Motor B]
     A --> D[Motor C]
+```
+## 🧩 System Architecture and Communication Flow
 
-## System Architecture and Communication Flow
+This section outlines the collaborative communication model between multiple EV3 robots and a central PC, which coordinates the **PSO process**.  
+Each robot acts as a **particle in the swarm**, evaluating potential movements, while the server (PC) manages the optimization logic and termination conditions.
 
-This section outlines the collaborative communication model between multiple EV3 robots and a central PC, which coordinates the Particle Swarm Optimization (PSO) process. Each robot acts as a particle in the swarm, evaluating potential movements, while the server (PC) manages the optimization criteria and decides when to end the search.
+---
 
-### Architecture Overview
+### 🔗 Architecture Overview
 
 ```mermaid
 graph TD
@@ -43,3 +46,8 @@ graph TD
     R1 --> PC
     R2 --> PC
     R3 --> PC
+```
+
+This bidirectional communication ensures each robot receives PSO updates and reports its evaluation results to the server.
+
+---
