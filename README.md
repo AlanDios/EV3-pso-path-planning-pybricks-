@@ -23,3 +23,23 @@ graph LR
     A --> C[Motor B]
     A --> D[Motor C]
 
+## System Architecture and Communication Flow
+
+This section outlines the collaborative communication model between multiple EV3 robots and a central PC, which coordinates the Particle Swarm Optimization (PSO) process. Each robot acts as a particle in the swarm, evaluating potential movements, while the server (PC) manages the optimization criteria and decides when to end the search.
+
+### Architecture Overview
+
+```mermaid
+graph TD
+    PC[Central Server (PC)]
+    R1[Robot 1]
+    R2[Robot 2]
+    R3[Robot 3]
+
+    PC --> R1
+    PC --> R2
+    PC --> R3
+
+    R1 --> PC
+    R2 --> PC
+    R3 --> PC
