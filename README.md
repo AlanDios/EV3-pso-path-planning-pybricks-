@@ -34,7 +34,7 @@ Each robot acts as a **particle in the swarm**, evaluating potential movements, 
 
 ```mermaid
 graph TD
-    PC[Central Server (PC)]
+    PC[Central Server PC]
     R1[Robot 1]
     R2[Robot 2]
     R3[Robot 3]
