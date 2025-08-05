@@ -45,14 +45,14 @@ def handle_client(conn, addr):
 
 def broadcast_commands():
     """Função para enviar comandos para todos os EV3s conectados."""
-    print("\nDigite um comando para enviar a todos os EV3s (ex: 'start', 'stop')")
+    print("\nDigite um comando para enviar a todos os EV3s")
     print("Digite 'exit' para fechar o servidor.")
     while True:
         command = input("Comando> ")
         if command.lower() == 'exit':
             for client_conn in clients:
                 try:
-                    client_conn.sendall(b'shutdown')
+                    client_conn.sendall(b'desligar')
                     client_conn.close()
                 except: pass
             break
