@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import socket
 import time
-from ev3dev2.motor import LargeMotor, OUTPUT_A, OUTPUT_B, SpeedRPM, MoveTank
-from ev3dev2.sensor.lego import ColorSensor
+from ev3dev2.motor import LargeMotor, OUTPUT_C, OUTPUT_D, SpeedRPM, MoveTank
+from ev3dev2.sensor.lego import ColorSensor, GyroSensor
 from ev3dev2.sound import Sound
 from ev3dev2.display import Display
 from ev3dev2.led import Leds
@@ -15,6 +15,7 @@ DISCOVERY_RESPONSE = b"EV3_SERVER_HERE"
 
 # --- Variáveis de controle ---
 VELOCIDADE_DE_MOVIMENTO = 40 #Em ev3dev2, a velocidade é em porcentagem (0-100) ou RPM. Usaremos porcentagem.
+TAMANHO_CASA = 20 # Em cm 
 posicao_inicial = [0,0]
 posicao_atual = posicao_inicial
 fitas_detectadas = [0,0]
@@ -25,20 +26,17 @@ direcao_atual = 'N'
 # --- Inicialização ---
 sound = Sound()
 leds = Leds()
-left_motor = LargeMotor(OUTPUT_A)
-right_motor = LargeMotor(OUTPUT_B)
+left_motor = LargeMotor(OUTPUT_C)
+right_motor = LargeMotor(OUTPUT_D)
 color_sensor = ColorSensor('in4')
-
-# !!!! CASO TENHA SENSOR GIROSCÓPIO NO IF !!!
-# Lembrar de importar o GyroSensor
-#giroscopio = GyroSensor('in3')
+giroscopio = GyroSensor('in1')
 
 sound = Sound()
 screen = Display()
 leds = Leds()
 
 # A classe MoveTank é o equivalente do DriveBase
-robot = MoveTank(OUTPUT_A, OUTPUT_B)
+robot = MoveTank(OUTPUT_C, OUTPUT_D)
 robot.wheel_diameter_mm = 56
 robot.axle_track_mm = 120
 
@@ -46,13 +44,11 @@ def mover_e_detectar_cores(distancia_cm):
     """
     Move o robô uma determinada distancia, enquanto detecta e conta fitas coloridas.
     param: distancia_cm Distancia a ser percorrida pelo robo, caso negativo ele vai para trás
-    return: listas_detectadas retorna as fitas que foram detectadas até agora
     """
     global fitas_detectadas, cores_permitidas, VELOCIDADE_DE_MOVIMENTO
 
-    cor_anterior = ''
-    
     robot.reset()
+    cor_anterior = color_sensor.color_name
     distancia_alvo_mm = distancia_cm * 10
 
     if distancia_cm < 0:
@@ -78,7 +74,68 @@ def mover_e_detectar_cores(distancia_cm):
         time.sleep(0.03)
 
     robot.off()
-    return fitas_detectadas
+
+def orientar_para(direcao_desejada):
+    """
+    Gira o robô até que ele esteja apontando para a direção desejada.
+    Ex: Se estiver no 'N' e o alvo for 'L', gira para a direita uma vez.
+    """
+    global direcao_atual
+    
+    # Dicionário para determinar a rotação mais curta
+    rotacao_curta = {
+        'N': {'L': 'direita', 'O': 'esquerda', 'S': 'direita'},
+        'L': {'S': 'direita', 'N': 'esquerda', 'O': 'direita'},
+        'S': {'O': 'direita', 'L': 'esquerda', 'N': 'direita'},
+        'O': {'N': 'direita', 'S': 'esquerda', 'L': 'direita'}
+    }
+
+    while direcao_atual != direcao_desejada:
+        giro_a_fazer = rotacao_curta[direcao_atual].get(direcao_desejada)
+        
+        if giro_a_fazer == 'direita':
+            girar_direita()
+        elif giro_a_fazer == 'esquerda':
+            girar_esquerda()
+
+
+def ir_para_xy(x_alvo, y_alvo):
+    """
+    Navega o robô da sua posição atual para as coordenadas (x_alvo, y_alvo).
+    """
+    global posicao_atual
+
+    # --- Passo 1: Mover no Eixo Y (Fitas Pretas) ---
+    delta_y = y_alvo - posicao_atual[1]
+    if delta_y != 0:
+        # Define a direção (Norte para aumentar Y, Sul para diminuir Y)
+        direcao_y = 'N' if delta_y > 0 else 'S'
+        orientar_para(direcao_y)
+        
+        mover_e_detectar_cores(delta_y * TAMANHO_CASA)
+
+    # --- Passo 2: Mover no Eixo X (Fitas Verdes) ---
+    delta_x = x_alvo - posicao_atual[0]
+    if delta_x != 0:
+        # Define a direção (Leste para aumentar X, Oeste para diminuir X)
+        direcao_x = 'L' if delta_x > 0 else 'O'
+        orientar_para(direcao_x)
+
+        mover_e_detectar_cores(delta_x * TAMANHO_CASA)
+
+    pos_final = processa_posicao()
+
+    if pos_final[0] != x_alvo or pos_final[1] != y_alvo:
+        print("Erro ao movimentar ou calcular localização")
+        leds.set_color("LEFT", "RED") 
+        leds.set_color("RIGTH", "RED") 
+        return
+    
+    print("Navegação concluída! Posição final: " + posicao_atual)
+
+    # Envia a posição final para o servidor
+    mensagem = "x={},y={}".format(posicao_atual[0], posicao_atual[1])
+    client_socket.sendall(mensagem.encode('utf-8'))
 
 def processa_posicao():
     """
