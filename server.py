@@ -36,6 +36,10 @@ def handle_client(conn, addr):
             if not data: break
             message = data.decode('utf-8')
             print(f"[{addr}] Enviou: {message}")
+            # adiciona resposta
+            command = input("Comando> ")
+            conn.sendall(command.encode('utf-8'))
+
     except ConnectionResetError:
         print(f"[CONEXÃO PERDIDA] {addr} desconectou.")
     finally:
@@ -43,31 +47,60 @@ def handle_client(conn, addr):
         clients.remove(conn)
         conn.close()
 
-def broadcast_commands():
-    """Função para enviar comandos para todos os EV3s conectados."""
-    print("\nDigite um comando para enviar a todos os EV3s")
-    print("Digite 'exit' para fechar o servidor.")
-    while True:
-        command = input("Comando> ")
-        if command.lower() == 'exit':
-            for client_conn in clients:
-                try:
-                    client_conn.sendall(b'desligar')
-                    client_conn.close()
-                except: pass
-            break
-        if not clients:
-            print("Nenhum EV3 conectado.")
-            continue
-        print(f"Enviando '{command}' para {len(clients)} EV3s...")
+def send_command_to_ev3(idx, message):
+    """Envia uma mensagem para um cliente específico ou para todos. 
+    Se 'exit', encerra o servidor e desconecta todos.
+    """
+    global running
+
+    if not clients:
+        print("[AVISO] Nenhum EV3 conectado.")
+        return
+
+    if message.lower() == "exit":
+        print("[SERVIDOR] Encerrando conexões com todos os EV3s...")
         for client_conn in list(clients):
             try:
-                client_conn.sendall(command.encode('utf-8'))
+                client_conn.sendall(b'desligar')
+                client_conn.close()
             except:
-                print(f"Falha ao enviar para um cliente. Removendo.")
+                pass
+        clients.clear()
+        running = False
+        return
+
+    if idx == "all":
+        print(f"[ENVIO] Mandando '{message}' para todos os EV3s...")
+        for client_conn in list(clients):
+            try:
+                client_conn.sendall(message.encode('utf-8'))
+            except Exception as e:
+                print(f"[ERRO] Falha ao enviar para um cliente: {e}")
                 clients.remove(client_conn)
-    global running
-    running = False
+    else:
+        try:
+            conn = clients[idx]
+            conn.sendall(message.encode('utf-8'))
+            print(f"[ENVIO] Mensagem '{message}' enviada para EV3 #{idx}")
+        except IndexError:
+            print(f"[ERRO] Não existe cliente no índice {idx}")
+        except Exception as e:
+            print(f"[ERRO] Falha ao enviar mensagem para EV3 #{idx}: {e}")
+
+
+def command_input_loop():
+    """Loop para ler comandos do terminal e enviá-los via send_message_to_ev3."""
+    print("\nDigite um comando para enviar ('all' = todos os EV3s)")
+    print("Digite 'exit' para fechar o servidor.")
+    while running:
+        target = input("Destino (índice ou 'all')> ").strip()
+        if target.isdigit():
+            idx = int(target)
+        else:
+            idx = target
+
+        cmd = input("Comando> ").strip()
+        send_command_to_ev3(idx, cmd)
 
 # --- Lógica Principal do Servidor ---
 running = True
@@ -77,7 +110,7 @@ discovery_thread = threading.Thread(target=listen_for_discovery, daemon=True)
 discovery_thread.start()
 
 # Inicia a thread para broadcast de comandos
-command_thread = threading.Thread(target=broadcast_commands, daemon=True)
+command_thread = threading.Thread(target=command_input_loop, daemon=True)
 command_thread.start()
 
 # Inicia o servidor principal TCP
@@ -90,6 +123,7 @@ server_socket.settimeout(1.0)
 while running:
     try:
         conn, addr = server_socket.accept()
+        print(conn)
         thread = threading.Thread(target=handle_client, args=(conn, addr))
         thread.start()
         client_threads.append(thread)
