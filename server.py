@@ -1,5 +1,6 @@
 import socket
 import threading
+import time
 
 # -- Configurações do Servidor --
 HOST = '0.0.0.0'  # Escuta em todas as interfaces
@@ -10,6 +11,9 @@ DISCOVERY_RESPONSE = b"EV3_SERVER_HERE"
 
 clients = []
 client_threads = []
+posicao =[] # lista de dict
+pos_lock = threading.Lock()   # protege a lista `posicao`
+# posicao já existe como lista global: posicao = []
 
 def listen_for_discovery():
     """Thread que escuta por broadcasts UDP e responde com o IP do servidor."""
@@ -33,19 +37,35 @@ def handle_client(conn, addr):
     try:
         while True:
             data = conn.recv(1024)
-            if not data: break
-            message = data.decode('utf-8')
+            if not data:
+                break
+
+            message = data.decode('utf-8', errors='ignore').strip()
             print(f"[{addr}] Enviou: {message}")
-            # adiciona resposta
+
+            # se for resposta de posição, parseia e armazena e pula o input()
+            if parse_and_store_posicao(conn, message):
+                continue
+
+            # comportamento original — input interativo para enviar comandos ao cliente
             command = input("Comando> ")
-            conn.sendall(command.encode('utf-8'))
+            try:
+                conn.sendall(command.encode('utf-8'))
+            except Exception as e:
+                print(f"[ERRO] Falha ao enviar comando para {addr}: {e}")
+                break
 
     except ConnectionResetError:
         print(f"[CONEXÃO PERDIDA] {addr} desconectou.")
     finally:
         print(f"[FIM DA CONEXÃO] {addr} desconectado.")
-        clients.remove(conn)
+        try:
+            clients.remove(conn)
+        except ValueError:
+            pass
         conn.close()
+
+
 
 def send_command_to_ev3(idx, message):
     """Envia uma mensagem para um cliente específico ou para todos. 
@@ -100,7 +120,75 @@ def command_input_loop():
             idx = target
 
         cmd = input("Comando> ").strip()
-        send_message_to_ev3(idx, cmd)
+        send_command_to_ev3(idx, cmd)
+
+def parse_and_store_posicao(conn, message):
+    """
+    Tenta parsear `message` no formato "x=NUM,y=NUM".
+    Se for válido, atualiza posicao[idx] onde idx = clients.index(conn).
+    Retorna True se foi mensagem de posição, False caso contrário.
+    """
+    message = message.strip()
+    if not (message.startswith("x=") and "y=" in message):
+        return False
+
+    try:
+        parts = message.split(',')
+        x = int(parts[0].split('=')[1])
+        y = int(parts[1].split('=')[1])
+    except Exception as e:
+        print(f"[ERRO parse posicao] {e}")
+        return False
+
+    # determina índice do cliente (atenção: índices mudam se clientes entrarem/sair)
+    try:
+        idx = clients.index(conn)
+    except ValueError:
+        idx = None
+
+    if idx is not None:
+        with pos_lock:
+            while len(posicao) <= idx:
+                posicao.append({'x': None, 'y': None})
+            posicao[idx] = {'x': x, 'y': y}
+        print(f"[POSIÇÃO ATUALIZADA] cliente#{idx} -> x={x}, y={y}")
+
+    return True
+
+
+def call_send_command(idx, message, wait_for_pos=False, timeout=5.0, poll_interval=0.05):
+    """
+    Envia send_command_to_ev3(idx, message).
+    - Se message == 'posicao' ou wait_for_pos True -> faz polling em posicao[idx] até timeout e retorna o dict {'x':..., 'y':...} ou None.
+    - Caso contrário, dispara o envio e retorna None.
+    OBS: `idx` aqui é o índice na lista clients (como no seu código atual).
+    """
+    # envia (usa sua função existente)
+    send_command_to_ev3(idx, message)
+
+    # decide se devemos aguardar update de posicao
+    if not wait_for_pos and message.strip().lower() != 'posicao':
+        return None
+
+    # polling simples esperando posicao ser preenchida
+    start = time.time()
+    try:
+        target_idx = int(idx)
+    except Exception:
+        print("[call_send_command] idx inválido para esperar posição.")
+        return None
+
+    while (time.time() - start) < timeout:
+        with pos_lock:
+            if 0 <= target_idx < len(posicao):
+                p = posicao[target_idx]
+                if p and p.get('x') is not None and p.get('y') is not None:
+                    return p.copy()   # devolve cópia para evitar race
+        time.sleep(poll_interval)
+
+    print(f"[call_send_command] TIMEOUT aguardando posicao de cliente#{idx}")
+    return None
+
 
 # --- Lógica Principal do Servidor ---
 running = True
@@ -132,3 +220,12 @@ while running:
 
 print("[DESLIGANDO] Fechando o servidor...")
 server_socket.close()
+
+# Representa o uso das novas funcoes para obter a posicao e já guardá-la no dict.
+# chamar essa funcao no computador central que executa o PSO
+################## pos = call_send_command(idx, 'posicao', timeout=5.0) ##########################
+# print(pos)  # vai esperar até 5 segundos ou até a posição ser atualizada
+# A ideia dessa funcao é mandar a string 'posicao' para o ev3. Com isso, o ev3 irá responder com a posicao (x = {} y ={})
+# A resposta do ev3 então chega em server.py em handle_client. Essa funcao está modificada para receber a posicao e já preencher o dicionario
+# posicao.
+# A posicao preenchida é retornada por call_send_command, o que torna possível chamar essa funcao por fora do arquivo server.py
