@@ -100,7 +100,7 @@ def command_input_loop():
             idx = target
 
         cmd = input("Comando> ").strip()
-        send_message_to_ev3(idx, cmd)
+        send_command_to_ev3(idx, cmd)
 
 # --- Lógica Principal do Servidor ---
 running = True
