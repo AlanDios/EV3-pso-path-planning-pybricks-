@@ -1,5 +1,8 @@
-import socket
+from socket import SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET, socket, AF_INET, SOCK_DGRAM, timeout
 import threading
+from typing import Dict, Tuple
+
+from robot import Robot
 
 # -- Configurações do Servidor --
 HOST = '0.0.0.0'  # Escuta em todas as interfaces
@@ -8,14 +11,14 @@ UDP_PORT = 65431    # Porta para descoberta (UDP)
 DISCOVERY_REQUEST = b"EV3_DISCOVERY_REQUEST"
 DISCOVERY_RESPONSE = b"EV3_SERVER_HERE"
 
-clients = {}
+particulas: Dict[Tuple[str, int], Robot] = {}
 client_threads = []
 running = True
 
 def listen_for_discovery():
     """Thread que escuta por broadcasts UDP e responde com o IP do servidor."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    with socket(AF_INET, SOCK_DGRAM) as s:
+        s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
         s.bind((HOST, UDP_PORT))
         print(f"[DISCOVERY] Escutando por broadcasts na porta UDP {UDP_PORT}")
         while running:
@@ -32,12 +35,8 @@ def handle_client(conn, addr):
     """Função para lidar com a comunicação de um cliente EV3 individual (TCP)."""
     print(f"[NOVA CONEXÃO TCP] {addr} conectado.")
     
-    clients[addr] = {
-        'conn': conn,
-        'posicao': (0,0), 
-        'p_best': (0,0)
-    }
-
+    particulas[addr] = Robot((0,0), conn)
+    
     try:
         while True:
             data = conn.recv(1024)
@@ -47,9 +46,8 @@ def handle_client(conn, addr):
             if message.startswith("pos:"):
                 try:
                     parts = message.split(':')[1].split(';')
-                    new_pos = (int(parts[0]), int(parts[1]))
-                    clients[addr]['posicao'] = new_pos
-                    print(f"[ATUALIZAÇÃO] Posição de {addr} atualizada para {new_pos}")
+                    particulas[addr].update_position(int(parts[0]), int(parts[1]))
+                    print(f"[ATUALIZAÇÃO] Posição de {addr} atualizada para {parts[0]},{parts[1]}")
                 except (ValueError, IndexError) as e:
                     print(f"[ERRO] Formato de mensagem de posição inválido de {addr}: {e}")
                 
@@ -57,9 +55,10 @@ def handle_client(conn, addr):
         print(f"[CONEXÃO PERDIDA] {addr} desconectou abruptamente.")
     finally:
         print(f"[FIM DA CONEXÃO] {addr} desconectado.")
-        if addr in clients:
-            del clients[addr]
+        if addr in particulas:
+            del particulas[addr]
         conn.close()
+
 
 def broadcast_commands():
     """Função para enviar comandos para todos os EV3s conectados via input."""
@@ -77,56 +76,55 @@ def broadcast_commands():
             running = False # Sinaliza para as outras threads pararem
             print("[SAINDO] Enviando comando de desligamento para todos...")
             # Itera sobre uma cópia dos valores do dicionário para evitar erros de tamanho
-            for client_data in list(clients.values()):
+            for client_data in list(particulas.values()):
                 try:
-                    client_data['conn'].sendall(b'desligar')
-                    client_data['conn'].close()
+                    client_data.conn.sendall(b'desligar')
+                    client_data.conn.close()
                 except Exception as e:
                     print(f"Erro ao desconectar cliente: {e}")
             break # Sai do loop de comando
 
         if command.lower() == 'list':
-            if not clients:
+            if not particulas:
                 print("Nenhum cliente conectado.")
             else:
                 print("\n--- Clientes Conectados ---")
-                for addr, data in clients.items():
+                for addr, data in particulas.items():
                     print(f"Cliente: {addr}")
-                    print(f"  Posição: {data['posicao']}")
-                    print(f"  P-Best: {data['p_best']}")
+                    print(f"  Posição: {data.position}")
+                    print(f"  P-Best: {data.pbest_val}")
                 print("---------------------------\n")
             continue
 
-        if not clients:
+        if not particulas:
             print("Nenhum EV3 conectado.")
             continue
             
-        print(f"Enviando '{command}' para {len(clients)} EV3s...")
+        print(f"Enviando '{command}' para {len(particulas)} EV3s...")
         # Itera sobre uma cópia das chaves para poder remover itens durante a iteração
-        for addr in list(clients.keys()):
+        for addr in list(particulas.keys()):
             try:
-                clients[addr]['conn'].sendall(command.encode('utf-8'))
+                particulas[addr].conn.sendall(command.encode('utf-8'))
             except Exception as e:
                 print(f"Falha ao enviar para {addr}. Removendo. Erro: {e}")
-                clients[addr]['conn'].close()
-                del clients[addr]
+                particulas[addr].conn.close()
+                del particulas[addr]
 
 def send_command_to_ev3(addr, message):
     """
     Envia uma mensagem para um cliente específico pelo seu endereço (addr).
     """
-    if addr not in clients:
+    if addr not in particulas:
         print(f"[ERRO] Não existe cliente com o endereço {addr}")
         return
 
     try:
-        conn = clients[addr]['conn']
-        conn.sendall(message.encode('utf-8'))
+        particulas[addr].conn.sendall(message.encode('utf-8'))
         print(f"[ENVIO] Mensagem '{message}' enviada para EV3 em {addr}")
     except Exception as e:
         print(f"[ERRO] Falha ao enviar mensagem para EV3 em {addr}: {e}")
-        clients[addr]['conn'].close()
-        del clients[addr]
+        particulas[addr].conn.close()
+        del particulas[addr]
 
 
 # --- Lógica Principal do Servidor ---
@@ -140,7 +138,7 @@ command_thread = threading.Thread(target=broadcast_commands, daemon=True)
 command_thread.start()
 
 # Inicia o servidor principal TCP
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket = socket(AF_INET, SOCK_STREAM)
 server_socket.bind((HOST, TCP_PORT))
 server_socket.listen()
 
@@ -154,7 +152,7 @@ try:
             thread = threading.Thread(target=handle_client, args=(conn, addr))
             thread.start()
             client_threads.append(thread)
-        except socket.timeout:
+        except timeout:
             continue 
 except KeyboardInterrupt:
     print("\n[INTERRUPÇÃO] Recebido Ctrl+C. Desligando...")
