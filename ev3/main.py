@@ -17,7 +17,7 @@ DISCOVERY_RESPONSE = b"EV3_SERVER_HERE"
 
 # --- Variaveis de controle ---
 VELOCIDADE_DE_MOVIMENTO = 40
-TAMANHO_CASA = 20
+TAMANHO_CASA = 28
 posicao_inicial = [0,0]
 posicao_atual = posicao_inicial
 fitas_detectadas = [0,0]
@@ -132,12 +132,12 @@ def ir_para_xy(x_alvo, y_alvo):
     if delta_y != 0:
         direcao_y = 'N' if delta_y > 0 else 'S'
         orientar_para(direcao_y)
-        mover_e_detectar_cores(delta_y * TAMANHO_CASA)
+        mover_e_detectar_cores(abs(delta_y) * TAMANHO_CASA)
     delta_x = x_alvo - posicao_atual[0]
     if delta_x != 0:
         direcao_x = 'L' if delta_x > 0 else 'O'
         orientar_para(direcao_x)
-        mover_e_detectar_cores(delta_x * TAMANHO_CASA)
+        mover_e_detectar_cores(abs(delta_x) * TAMANHO_CASA)
     pos_final = processa_posicao()
     if pos_final[0] != x_alvo or pos_final[1] != y_alvo:
         print("Erro ao movimentar ou calcular localizacao")
@@ -145,10 +145,9 @@ def ir_para_xy(x_alvo, y_alvo):
         return
     posicao_atual = pos_final
     print("Navegacao concluida! Posicao final: {}".format(posicao_atual))
-    mensagem = "pos:{},{}".format(posicao_atual[0], posicao_atual[1])
-    client_socket.sendall(mensagem.encode('utf-8'))
 
 def processa_posicao():
+    return posicao_atual
     global fitas_detectadas
     return [fitas_detectadas[1], fitas_detectadas[0]]
 
@@ -174,6 +173,11 @@ def atualizar_direcao(giro):
     elif giro.lower() == 'esquerda':
         return direcoes_cardinais[(indice_atual - 1 + len(direcoes_cardinais)) % len(direcoes_cardinais)]
 
+def envia_posicao(conn):
+    posicao_atual = processa_posicao()
+    mensagem = "pos:{};{}".format(posicao_atual[0], posicao_atual[1])
+    conn.sendall(mensagem.encode('utf-8'))
+    
 
 # --- FLUXO PRINCIPAL DO PROGRAMA ---
 sound.beep()
@@ -225,7 +229,7 @@ try:
     time.sleep(3) # Mostra a mensagem por 3 segundos
     
     client_socket.sendall(b"Ola, sou um EV3!")
-    client_socket.sendall("pos:{},{}".format(posicao_atual[0], posicao_atual[1]).encode('utf-8'))
+    envia_posicao(client_socket)
     
     while True:
         command_bytes = client_socket.recv(1024)
@@ -247,6 +251,7 @@ try:
                 x_str, y_str = coords.split(';')
                 x_alvo, y_alvo = float(x_str), float(y_str)
                 ir_para_xy(int(x_alvo), int(y_alvo))
+                envia_posicao()
             except Exception as e:
                 print("Erro ao processar comando 'ir': {}".format(e))
         elif command == 'frente':
@@ -258,9 +263,7 @@ try:
         elif command == 'direita':
             girar_direita()
         elif command == 'posicao':
-            posicao_atual = processa_posicao()
-            mensagem = "pos:{},{}".format(posicao_atual[0], posicao_atual[1])
-            client_socket.sendall(mensagem.encode('utf-8'))
+            envia_posicao(client_socket)
 
 finally:
     print("Desconectado.")
