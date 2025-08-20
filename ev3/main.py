@@ -17,6 +17,7 @@ DISCOVERY_RESPONSE = b"EV3_SERVER_HERE"
 
 # --- Variaveis de controle ---
 VELOCIDADE_DE_MOVIMENTO = 40
+VELOCIDADE_DE_GIRO = 20 ## ADICIONADO: Velocidade mais lenta para giros precisos
 TAMANHO_CASA = 28
 posicao_inicial = [0,0]
 posicao_atual = posicao_inicial
@@ -94,7 +95,7 @@ def definir_direcao_inicial():
         time.sleep(0.15)
     return direcao_selecionada
 
-# --- As suas funcoes de movimento (mover_e_detectar_cores, etc) continuam aqui sem alteracao ---
+
 def mover_e_detectar_cores(distancia_cm):
     global fitas_detectadas, cores_permitidas, VELOCIDADE_DE_MOVIMENTO
     robot.reset()
@@ -114,13 +115,16 @@ def mover_e_detectar_cores(distancia_cm):
 
 def orientar_para(direcao_desejada):
     global direcao_atual
+    # Dicionario para encontrar o caminho mais curto (1 giro de 90 ou 180 graus)
+    # O valor 'direita' ou 'esquerda' indica o primeiro movimento a ser feito
     rotacao_curta = {
-        'N': {'L': 'direita', 'O': 'esquerda', 'S': 'direita'},
+        'N': {'L': 'direita', 'O': 'esquerda', 'S': 'direita'}, # De Norte para Sul, tanto faz, escolhemos direita
         'L': {'S': 'direita', 'N': 'esquerda', 'O': 'direita'},
         'S': {'O': 'direita', 'L': 'esquerda', 'N': 'direita'},
         'O': {'N': 'direita', 'S': 'esquerda', 'L': 'direita'}
     }
     
+    # Gira 90 graus por vez ate atingir a direcao desejada
     while direcao_atual != direcao_desejada:
         giro_a_fazer = rotacao_curta[direcao_atual].get(direcao_desejada)
         if giro_a_fazer == 'direita': girar_direita()
@@ -133,37 +137,64 @@ def ir_para_xy(x_alvo, y_alvo):
         direcao_y = 'N' if delta_y > 0 else 'S'
         orientar_para(direcao_y)
         mover_e_detectar_cores(abs(delta_y) * TAMANHO_CASA)
+    
+    # Atualiza a posicao apos o movimento em Y
+    posicao_atual[1] = y_alvo
+
     delta_x = x_alvo - posicao_atual[0]
     if delta_x != 0:
         direcao_x = 'L' if delta_x > 0 else 'O'
         orientar_para(direcao_x)
         mover_e_detectar_cores(abs(delta_x) * TAMANHO_CASA)
-    pos_final = processa_posicao()
-    if pos_final[0] != x_alvo or pos_final[1] != y_alvo:
-        print("Erro ao movimentar ou calcular localizacao")
-        leds.set_color("LEFT", "RED"); leds.set_color("RIGHT", "RED") 
-        return
-    posicao_atual = pos_final
+
+    # Atualiza a posicao apos o movimento em X
+    posicao_atual[0] = x_alvo
+    
     print("Navegacao concluida! Posicao final: {}".format(posicao_atual))
 
+
 def processa_posicao():
+    # Esta funcao parece ter um erro de logica (codigo inalancavel).
+    # Corrigindo para retornar a posicao atual real.
     return posicao_atual
-    global fitas_detectadas
-    return [fitas_detectadas[1], fitas_detectadas[0]]
+    # O codigo abaixo nunca sera executado por causa do 'return' acima.
+    # global fitas_detectadas
+    # return [fitas_detectadas[1], fitas_detectadas[0]]
+
+## --- ADICIONADO: Novas Funcoes de Movimento Preciso com Giroscopio --- ##
+def girar_direita_preciso():
+    angulo_alvo = giroscopio.angle + 90
+    robot.on(SpeedRPM(VELOCIDADE_DE_GIRO), SpeedRPM(-VELOCIDADE_DE_GIRO))
+    while giroscopio.angle < angulo_alvo:
+        time.sleep(0.01)
+    robot.off()
+
+def girar_esquerda_preciso():
+    angulo_alvo = giroscopio.angle - 90
+    robot.on(SpeedRPM(-VELOCIDADE_DE_GIRO), SpeedRPM(VELOCIDADE_DE_GIRO))
+    while giroscopio.angle > angulo_alvo:
+        time.sleep(0.01)
+    robot.off()
+## -------------------------------------------------------------------- ##
+
 
 def girar_direita():
+    ## --- ALTERADO --- ##
     global direcao_atual
-    time.sleep(1)
-    graus_motor = (robot.axle_track_mm * 90) / robot.wheel_diameter_mm
-    robot.on_for_degrees(SpeedRPM(VELOCIDADE_DE_MOVIMENTO), SpeedRPM(-VELOCIDADE_DE_MOVIMENTO), graus_motor)
+    print("Comando para girar a direita. Angulo atual: {}, Direcao: {}".format(giroscopio.angle, direcao_atual))
+    girar_direita_preciso() # Usa a nova funcao precisa
     direcao_atual = atualizar_direcao('direita')
+    time.sleep(0.5) # Pausa para estabilizar
+    print("Giro concluido. Novo angulo: {}, Nova direcao: {}".format(giroscopio.angle, direcao_atual))
     
 def girar_esquerda():
+    ## --- ALTERADO --- ##
     global direcao_atual
-    time.sleep(1)
-    graus_motor = (robot.axle_track_mm * 90) / robot.wheel_diameter_mm
-    robot.on_for_degrees(SpeedRPM(-VELOCIDADE_DE_MOVIMENTO), SpeedRPM(VELOCIDADE_DE_MOVIMENTO), graus_motor)
+    print("Comando para girar a esquerda. Angulo atual: {}, Direcao: {}".format(giroscopio.angle, direcao_atual))
+    girar_esquerda_preciso() # Usa a nova funcao precisa
     direcao_atual = atualizar_direcao('esquerda')
+    time.sleep(0.5) # Pausa para estabilizar
+    print("Giro concluido. Novo angulo: {}, Nova direcao: {}".format(giroscopio.angle, direcao_atual))
 
 def atualizar_direcao(giro):
     global direcao_atual, direcoes_cardinais
@@ -190,8 +221,19 @@ print("Posicao inicial definida pelo usuario: {}".format(posicao_inicial))
 direcao_atual = definir_direcao_inicial()
 print("Direcao inicial definida pelo usuario: {}".format(direcao_atual))
 
+## --- ADICIONADO: Resetar o giroscopio apos definir a direcao --- ##
+# A direcao inicial definida pelo usuario agora corresponde ao angulo 0.
+print("Calibrando giroscopio...")
+giroscopio.mode = 'GYRO-ANG'
+giroscopio.reset()
+time.sleep(1)
+print("Giroscopio calibrado. Angulo inicial: {}".format(giroscopio.angle))
+
+
 # --- Descoberta do Servidor ---
 server_ip = None
+# (O restante do código de conexão e loop de comandos permanece o mesmo)
+# ...
 while server_ip is None:
     print("Procurando servidor...")
     leds.set_color("LEFT", "ORANGE"); leds.set_color("RIGHT", "ORANGE")
@@ -222,11 +264,10 @@ try:
     client_socket.connect((server_ip, TCP_PORT))
     print("Conectado!")
 
-    # NOVA EXIBICAO DE TELA - MENSAGEM DE CONEXAO
     screen.clear()
     screen.text_pixels("Conectado ao Servidor!", font=fonte_pequena, x=10, y=50)
     screen.update()
-    time.sleep(3) # Mostra a mensagem por 3 segundos
+    time.sleep(3)
     
     client_socket.sendall(b"Ola, sou um EV3!")
     envia_posicao(client_socket)
@@ -244,24 +285,22 @@ try:
         screen.text_pixels(command, font=fonte_grande, x=5, y=60)
         screen.update()
 
-        # Processamento dos comandos
         if command.startswith("ir:"):
             try:
                 _, coords = command.split(':')
                 x_str, y_str = coords.split(';')
-                x_alvo, y_alvo = float(x_str), float(y_str)
-                ir_para_xy(int(x_alvo), int(y_alvo))
-                envia_posicao()
+                x_alvo, y_alvo = int(x_str), int(y_str)
+                ir_para_xy(x_alvo, y_alvo)
+                envia_posicao(client_socket)
             except Exception as e:
                 print("Erro ao processar comando 'ir': {}".format(e))
-        elif command == 'frente':
-            mover_e_detectar_cores(50)
-        elif command == 'tras':
-            mover_e_detectar_cores(-50)
+                envia_posicao(client_socket) # Envia posicao mesmo em caso de erro
         elif command == 'esquerda':
             girar_esquerda()
+            envia_posicao(client_socket)
         elif command == 'direita':
             girar_direita()
+            envia_posicao(client_socket)
         elif command == 'posicao':
             envia_posicao(client_socket)
 
@@ -272,7 +311,6 @@ finally:
     if client_socket:
         client_socket.close()
     
-    # Exibe mensagem final na tela
     screen.clear()
     screen.text_pixels("Desconectado.", font=fonte_grande, x=20, y=50)
     screen.update()
